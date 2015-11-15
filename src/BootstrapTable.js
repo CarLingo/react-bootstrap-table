@@ -15,28 +15,6 @@ class BootstrapTable extends React.Component {
     super(props);
 
     this._attachCellEditFunc();
-    let {keyField} = props;
-    let customSortFuncMap = {};
-
-    if (!(typeof keyField === 'string' && keyField.length)) {
-      React.Children.forEach(this.props.children, column=> {
-        if (column.props.isKey) {
-          if (keyField != null) {
-            throw "Error. Multiple key column be detected in TableHeaderColumn.";
-          }
-          keyField = column.props.dataField;
-        }
-      }, this);
-    }
-
-    React.Children.forEach(this.props.children, column=> {
-      if (column.props.sortFunc) {
-        customSortFuncMap[column.props.dataField] = column.props.sortFunc;
-      }
-    }, this);
-
-    if (keyField == null)
-      throw "Error. No any key column defined in TableHeaderColumn. Use 'isKey={true}' to specify an unique column after version 0.5.4.";
 
     if (!Array.isArray(this.props.data)) {
       this.store = new TableDataStore(this.props.data.getData());
@@ -51,7 +29,7 @@ class BootstrapTable extends React.Component {
       this.store = new TableDataStore(this.props.data);
     }
 
-    this.store.setProps(this.props.pagination, keyField, customSortFuncMap, this.isRemoteDataSource());
+    this.initTable(this.props);
 
     if (this.props.selectRow && this.props.selectRow.selected) {
       this.store.setSelectedRowKey(this.props.selectRow.selected);
@@ -61,6 +39,40 @@ class BootstrapTable extends React.Component {
       data: this.getTableData(),
       selectedRowKeys: this.store.getSelectedRowKeys()
     };
+  }
+
+  initTable(props){
+    let {keyField} = props;
+    let customSortFuncMap = {};
+
+    if (!(typeof keyField === 'string' && keyField.length)) {
+      React.Children.forEach(props.children, column=> {
+        if (column.props.isKey) {
+          if (keyField != null) {
+            throw "Error. Multiple key column be detected in TableHeaderColumn.";
+          }
+          keyField = column.props.dataField;
+        }
+      }, this);
+    }
+
+    React.Children.forEach(props.children, column=> {
+      if (column.props.sortFunc) {
+        customSortFuncMap[column.props.dataField] = column.props.sortFunc;
+      }
+    }, this);
+
+    if (keyField == null)
+      throw "Error. No any key column defined in TableHeaderColumn."+
+            "Use 'isKey={true}' to specify an unique column after version 0.5.4.";
+
+    this.store.setProps({
+      isPagination:props.pagination,
+      keyField: keyField,
+      customSortFuncMap: customSortFuncMap,
+      multiColumnSearch: props.multiColumnSearch,
+      remote: this.isRemoteDataSource()
+    });
   }
 
   getTableData() {
@@ -82,8 +94,11 @@ class BootstrapTable extends React.Component {
   }
 
   componentWillReceiveProps(nextProps) {
+    this.initTable(nextProps);
     if (Array.isArray(nextProps.data)) {
       this.store.setData(nextProps.data);
+      this.store.page(nextProps.options.page || 1,
+        nextProps.options.sizePerPage || Const.SIZE_PER_PAGE_LIST[0]);
       this.setState({
         data: this.getTableData()
       });
@@ -100,10 +115,12 @@ class BootstrapTable extends React.Component {
   componentDidMount() {
     this._adjustHeaderWidth();
     window.addEventListener('resize', this._adjustHeaderWidth.bind(this));
+    this.refs.body.refs.container.addEventListener('scroll', this._scrollHeader.bind(this));
   }
 
   componentWillUnmount() {
     window.removeEventListener('resize', this._adjustHeaderWidth.bind(this));
+    this.refs.body.refs.container.removeEventListener('scroll', this._scrollHeader.bind(this));
   }
 
   componentDidUpdate() {
@@ -111,8 +128,6 @@ class BootstrapTable extends React.Component {
     this._attachCellEditFunc();
     if (this.props.options.afterTableComplete)
       this.props.options.afterTableComplete();
-    if (this.props.options.afterSearchOrFilter)
-      this.props.options.afterSearchOrFilter(this.store.getDataIgnoringPagination());
   }
 
   _attachCellEditFunc() {
@@ -153,6 +168,7 @@ class BootstrapTable extends React.Component {
         hidden: column.props.hidden,
         className: column.props.columnClassName,
         width: column.props.width,
+        text: column.props.children,
         index: i
       };
     }, this);
@@ -161,20 +177,23 @@ class BootstrapTable extends React.Component {
     var toolBar = this.renderToolBar();
     var tableFilter = this.renderTableFilter(columns);
     return (
-      <div className="react-bs-container">
+      <div className="react-bs-container" ref="table">
         {toolBar}
-        <div ref="table" style={style} className={tableClass}>
+        <div className="react-bs-table-container" style={style}>
           <TableHeader
+            ref="header"
             rowSelectType={this.props.selectRow.mode}
             hideSelectColumn={this.props.selectRow.hideSelectColumn}
             sortName={this.props.options.sortName}
             sortOrder={this.props.options.sortOrder}
             onSort={this.handleSort.bind(this)}
             onSelectAllRow={this.handleSelectAllRow.bind(this)}
-            bordered={this.props.bordered}>
+            bordered={this.props.bordered}
+            condensed={this.props.condensed}>
             {this.props.children}
           </TableHeader>
           <TableBody
+            height={this.props.height}
             ref="body"
             data={this.state.data}
             columns={columns}
@@ -190,9 +209,9 @@ class BootstrapTable extends React.Component {
             onRowClick={this.handleRowClick.bind(this)}
             onSelectRow={this.handleSelectRow.bind(this)}
           />
-          {tableFilter}
-          {pagination}
         </div>
+        {tableFilter}
+        {pagination}
       </div>
     )
   }
@@ -398,16 +417,18 @@ class BootstrapTable extends React.Component {
   }
 
   handleExportCSV() {
-    var result = this.store.get();
+    var result = this.store.getDataIgnoringPagination();
     var keys = [];
     this.props.children.map(function(column) {
-      keys.push(column.props.dataField);
+      if (column.props.hidden === false) {
+        keys.push(column.props.dataField);
+      }
     });
     exportCSV(result, keys, this.props.csvFileName);
   }
 
   handleSearch(searchText) {
-    this.store.search(searchText, this.props.multiColumnSearch);
+    this.store.search(searchText);
     let result;
     if (this.props.pagination) {
       let sizePerPage = this.refs.pagination.getSizePerPage();
@@ -506,12 +527,19 @@ class BootstrapTable extends React.Component {
     }
   }
 
+  _scrollHeader(e){
+    this.refs.header.refs.container.scrollLeft = e.currentTarget.scrollLeft;
+  }
+
   _adjustHeaderWidth() {
-    var tableHeaderDom = this.refs.table.childNodes[0].childNodes[0];
-    var tableBodyDom = this.refs.table.childNodes[1].childNodes[0];
+    var tableHeaderDom = this.refs.header.refs.container.childNodes[0];
+    var tableBodyDom = this.refs.body.refs.container.childNodes[0];
     if(tableHeaderDom.offsetWidth !== tableBodyDom.offsetWidth){
       tableHeaderDom.style.width = tableBodyDom.offsetWidth + "px";
     }
+    const headerProps = this.refs.body.getBodyHeaderDomProp();
+    this.refs.header.fitHeader(headerProps,
+      this.refs.body.refs.container.scrollHeight > this.refs.body.refs.container.clientHeight);
   }
 }
 
