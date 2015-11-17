@@ -49,14 +49,16 @@ export class TableDataStore {
     this.sortObj = null;
     this.pageObj = {};
     this.selected = [];
+    this.multiColumnSearch = false;
     this.remote = false; // remote data
   }
 
-  setProps(isPagination, keyField, customSortFuncMap, remote) {
-    this.keyField = keyField;
-    this.enablePagination = isPagination;
-    this.customSortFuncMap = customSortFuncMap;
-    this.remote = remote;
+  setProps(props) {
+    this.keyField = props.keyField;
+    this.enablePagination = props.isPagination;
+    this.customSortFuncMap = props.customSortFuncMap;
+    this.remote = props.remote;
+    this.multiColumnSearch = props.multiColumnSearch;
   }
 
   setData(data, multiColumnSearch) {
@@ -220,7 +222,7 @@ export class TableDataStore {
     });
   }
 
-  search(searchText, multiColumnSearch) {
+  search(searchText) {
     if (searchText.trim() === "") {
       this.filteredData = null;
       this.isOnFilter = false;
@@ -230,7 +232,7 @@ export class TableDataStore {
       var searchTextArray = [];
       var mode = ( searchText.indexOf(' and ') !== -1 ) ? 'and' : 'or';
 
-      if (multiColumnSearch) {
+      if (this.multiColumnSearch) {
         if (mode === 'and') {
           searchTextArray = searchText.split(' and ').filter(function(el) {return el.length != 0});;
           if ( searchTextArray.length <= 1 ) mode = 'or';
@@ -247,6 +249,18 @@ export class TableDataStore {
         this.orModeSearch(searchTextArray);
       }
 
+        for (var key in row) {
+          if (row[key]) {
+            searchTextArray.forEach(function(text) {
+              if (row[key].toString().toLowerCase().indexOf(text.toLowerCase()) !== -1) {
+                valid = true;
+              }
+            });
+            if (valid) break;
+          }
+        }
+        return valid;
+      }, this);
       this.isOnFilter = true;
     }
   }
